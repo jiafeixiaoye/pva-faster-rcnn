@@ -121,15 +121,34 @@ class AnchorTargetLayer(caffe.Layer):
 
         # keep only inside anchors
         anchors = all_anchors[inds_inside, :]
+        
         if DEBUG:
             print 'anchors.shape', anchors.shape
 
-        # label: 1 is positive, 0 is negative, -1 is dont care
+        # label: 1 is positive, 0 is negative, -1 is dont care, 2 is can't delete negative
         labels = np.empty((len(inds_inside), ), dtype=np.float32)
         labels.fill(-1)
 
         # overlaps between the anchors and the gt boxes
         # overlaps (ex, gt)
+        #Cathy
+        has_shadow = False
+        fbg_gt_boxes = np.zeros((1,5))
+        fg_gt_boxes = np.zeros((1,5))
+        fbg = 4
+        for box in gt_boxes:
+            temp = np.array((box[0],box[1],box[2],box[3],box[4]))
+            if int(box[4]) == fbg:
+                has_shadow = True
+                fbg_gt_boxes = np.vstack((fbg_gt_boxes, temp))
+            else:
+                fg_gt_boxes = np.vstack((fg_gt_boxes, temp))
+        fg_gt_boxes = np.delete(fg_gt_boxes, 0, 0)
+        fbg_gt_boxes = np.delete(fbg_gt_boxes, 0, 0)
+        gt_boxes = np.vstack((fbg_gt_boxes, fg_gt_boxes))
+        if DEBUG:
+            print fbg_gt_boxes
+        #Cathy
         overlaps = bbox_overlaps(
             np.ascontiguousarray(anchors, dtype=np.float),
             np.ascontiguousarray(gt_boxes, dtype=np.float))
@@ -139,16 +158,32 @@ class AnchorTargetLayer(caffe.Layer):
         gt_max_overlaps = overlaps[gt_argmax_overlaps,
                                    np.arange(overlaps.shape[1])]
         gt_argmax_overlaps = np.where(overlaps == gt_max_overlaps)[0]
-
+        #Cathy
+        if has_shadow:
+            fbg_overlaps = bbox_overlaps(
+                np.ascontiguousarray(anchors, dtype=np.float),
+                np.ascontiguousarray(fbg_gt_boxes, dtype=np.float))
+            fbg_argmax_overlaps = fbg_overlaps.argmax(axis=1)
+            fbg_max_overlaps = fbg_overlaps[np.arange(len(inds_inside)), fbg_argmax_overlaps]
+            fbg_gt_argmax_overlaps = fbg_overlaps.argmax(axis=0)
+            fbg_gt_max_overlaps = fbg_overlaps[fbg_gt_argmax_overlaps,
+                                   np.arange(fbg_overlaps.shape[1])]
+            fbg_gt_argmax_overlaps = np.where(fbg_overlaps == fbg_gt_max_overlaps)[0]
+        #Cathy
         if not cfg.TRAIN.RPN_CLOBBER_POSITIVES:
             # assign bg labels first so that positive labels can clobber them
             labels[max_overlaps < cfg.TRAIN.RPN_NEGATIVE_OVERLAP] = 0
-
-        # fg label: for each gt, anchor with highest overlap
+        
         labels[gt_argmax_overlaps] = 1
+        labels[max_overlaps >= cfg.TRAIN.RPN_POSITIVE_OVERLAP] = 1
+
+        #Cathy: label the whole label with 0, then label the positive classes with 1
+        if has_shadow:
+        # fg label: for each gt, anchor with highest overlap
+            labels[fbg_gt_argmax_overlaps] = 2
 
         # fg label: above threshold IOU
-        labels[max_overlaps >= cfg.TRAIN.RPN_POSITIVE_OVERLAP] = 1
+            labels[fbg_max_overlaps >= cfg.TRAIN.RPN_POSITIVE_OVERLAP] = 2
 
         if cfg.TRAIN.RPN_CLOBBER_POSITIVES:
             # assign bg labels last so that negative labels can clobber positives
@@ -160,15 +195,17 @@ class AnchorTargetLayer(caffe.Layer):
         if len(fg_inds) > num_fg:
             disable_inds = npr.choice(
                 fg_inds, size=(len(fg_inds) - num_fg), replace=False)
-            labels[disable_inds] = -1
+            labels[disable_inds] = -1 
 
         # subsample negative labels if we have too many
+        retain_inds = np.where(labels == 2)[0]
         num_bg = cfg.TRAIN.RPN_BATCHSIZE - np.sum(labels == 1)
         bg_inds = np.where(labels == 0)[0]
         if len(bg_inds) > num_bg:
             disable_inds = npr.choice(
-                bg_inds, size=(len(bg_inds) - num_bg), replace=False)
+                bg_inds, size=(len(bg_inds) + len(retain_inds) - num_bg), replace=False)
             labels[disable_inds] = -1
+        labels[retain_inds] = 0
             #print "was %s inds, disabling %s, now %s inds" % (
                 #len(bg_inds), len(disable_inds), np.sum(labels == 0))
 
