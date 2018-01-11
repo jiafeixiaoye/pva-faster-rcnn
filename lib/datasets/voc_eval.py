@@ -15,15 +15,16 @@ def parse_rec(filename):
     objects = []
     for obj in tree.findall('object'):
         obj_struct = {}
-        obj_struct['name'] = obj.find('name').text
+        obj_struct['name'] = obj.find('name').text.lower().strip()
+        print obj.find('name').text.lower().strip()
         obj_struct['pose'] = obj.find('pose').text
         obj_struct['truncated'] = int(obj.find('truncated').text)
         obj_struct['difficult'] = int(obj.find('difficult').text)
         bbox = obj.find('bndbox')
-        obj_struct['bbox'] = [int(bbox.find('xmin').text),
-                              int(bbox.find('ymin').text),
-                              int(bbox.find('xmax').text),
-                              int(bbox.find('ymax').text)]
+        obj_struct['bbox'] = [int(float(bbox.find('xmin').text)),
+                              int(float(bbox.find('ymin').text)),
+                              int(float(bbox.find('xmax').text)),
+                              int(float(bbox.find('ymax').text))]
         objects.append(obj_struct)
 
     return objects
@@ -106,6 +107,7 @@ def voc_eval(detpath,
         # load annots
         recs = {}
         for i, imagename in enumerate(imagenames):
+            print imagename
             recs[imagename] = parse_rec(annopath.format(imagename))
             if i % 100 == 0:
                 print 'Reading annotation for {:d}/{:d}'.format(
@@ -121,38 +123,96 @@ def voc_eval(detpath,
 
     # extract gt objects for this class
     class_recs = {}
+    folder_npos = {}
+    folder_num = {}
+    per_npos = 0
     npos = 0
+    num = 0
+    compare_str = ''
     for imagename in imagenames:
+        #print recs
         R = [obj for obj in recs[imagename] if obj['name'] == classname]
         bbox = np.array([x['bbox'] for x in R])
         difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
         det = [False] * len(R)
         npos = npos + sum(~difficult)
+        per_npos = per_npos + sum(~difficult)
+        num = num + 1
+        namelist = imagename.split('-')
+        file_prefix = namelist[0]
+        if len(namelist)== 1:
+            name_list = imagename.split('_')
+            if len(name_list) > 4:
+            #if imagename[2] == '_':
+                file_prefix = 'w'
+            elif imagename[0] == '0' and imagename[1] == '0':
+                #print imagename
+                file_prefix = '0'
+        if compare_str == '':
+            compare_str = file_prefix
+        if compare_str != file_prefix:
+            folder_npos[compare_str] = per_npos
+            folder_num[compare_str] = 0
+            compare_str = file_prefix
+            per_npos = 0
+            num = 0
         class_recs[imagename] = {'bbox': bbox,
                                  'difficult': difficult,
                                  'det': det}
-
+    folder_npos[compare_str] = per_npos
+    folder_num[compare_str] = 0
     # read dets
     detfile = detpath.format(classname)
     with open(detfile, 'r') as f:
         lines = f.readlines()
-
     splitlines = [x.strip().split(' ') for x in lines]
     image_ids = [x[0] for x in splitlines]
     confidence = np.array([float(x[1]) for x in splitlines])
     BB = np.array([[float(z) for z in x[2:]] for x in splitlines])
-
     # sort by confidence
     sorted_ind = np.argsort(-confidence)
     sorted_scores = np.sort(-confidence)
     BB = BB[sorted_ind, :]
     image_ids = [image_ids[x] for x in sorted_ind]
-
     # go down dets and mark TPs and FPs
     nd = len(image_ids)
     tp = np.zeros(nd)
     fp = np.zeros(nd)
+    folder_tp = {}
+    folder_fp = {}
+    folder_count = {}
+    duplicate_list = []
+    for id in range(nd):
+        image_name = image_ids[id]
+        namelist = image_name.split('-')
+        if len(namelist) > 1:
+            file_prefix = namelist[0]
+        else:
+            name_list = image_name.split('_')
+            if len(name_list) > 4:
+            #if imagename[2] == '_':
+                file_prefix = 'w'
+            elif image_name[0] == '0' and image_name[1] == '0':
+                file_prefix = '0'
+                #print image_name
+        #print file_prefix
+        folder_num[file_prefix] = folder_num[file_prefix] + 1
+    for key in folder_num:
+        folder_tp[key] = np.zeros(folder_num[key])
+        folder_fp[key] = np.zeros(folder_num[key])
+        folder_count[key] = 0
     for d in range(nd):
+        image_name = image_ids[d]
+        namelist = image_name.split('-')
+        if len(namelist) > 1:
+            file_prefix = namelist[0]
+        else:
+            name_list = image_name.split('_')
+            if len(name_list) > 4:
+            #if imagename[2] == '_':
+                file_prefix = 'w'
+            elif image_name[0] == '0' and image_name[1] == '0':
+                file_prefix = '0'
         R = class_recs[image_ids[d]]
         bb = BB[d, :].astype(float)
         ovmax = -np.inf
@@ -182,11 +242,17 @@ def voc_eval(detpath,
             if not R['difficult'][jmax]:
                 if not R['det'][jmax]:
                     tp[d] = 1.
+                    folder_tp[file_prefix][(folder_count[file_prefix])] = 1.
                     R['det'][jmax] = 1
                 else:
                     fp[d] = 1.
+                    folder_fp[file_prefix][(folder_count[file_prefix])] = 1.
         else:
             fp[d] = 1.
+            folder_fp[file_prefix][(folder_count[file_prefix])] = 1.
+        #if image_name not in duplicate_list:
+        #    duplicate_list.append(image_name)
+        folder_count[file_prefix] = folder_count[file_prefix] + 1
 
     # compute precision recall
     fp = np.cumsum(fp)
@@ -196,5 +262,13 @@ def voc_eval(detpath,
     # ground truth
     prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
     ap = voc_ap(rec, prec, use_07_metric)
-
-    return rec, prec, ap
+    folder_rec = {}
+    folder_prec = {}
+    folder_ap = {}
+    for key in folder_num:
+        folder_fp[key] = np.cumsum(folder_fp[key])
+        folder_tp[key] = np.cumsum(folder_tp[key])
+        folder_rec[key] = folder_tp[key]/float(folder_npos[key])
+        folder_prec[key] = folder_tp[key]/np.maximum(folder_tp[key]+folder_fp[key],np.finfo(np.float64).eps)
+        folder_ap[key] = voc_ap(folder_rec[key], folder_prec[key], use_07_metric)
+    return rec, prec, ap, folder_rec, folder_prec, folder_ap
