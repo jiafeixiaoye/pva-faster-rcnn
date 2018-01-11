@@ -28,11 +28,12 @@ class pascal_voc(imdb):
                             else devkit_path
         self._data_path = os.path.join(self._devkit_path, 'VOC' + self._year)
         self._classes = ('__background__', # always index 0
-                         'aeroplane', 'bicycle', 'bird', 'boat',
-                         'bottle', 'bus', 'car', 'cat', 'chair',
-                         'cow', 'diningtable', 'dog', 'horse',
-                         'motorbike', 'person', 'pottedplant',
-                         'sheep', 'sofa', 'train', 'tvmonitor')
+                         #'aeroplane', 'bicycle', 'bird', 'boat',
+                         #'bottle', 'bus', 'car', 'cat', 'chair',
+                         #'cow', 'diningtable', 'dog', 'horse',
+                         #'motorbike', 'person', 'pottedplant',
+                         #'sheep', 'sofa', 'train', 'tvmonitor','head','cart','face')
+                         'face','head','cart','shadow')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index()
@@ -102,9 +103,10 @@ class pascal_voc(imdb):
                 roidb = cPickle.load(fid)
             print '{} gt roidb loaded from {}'.format(self.name, cache_file)
             return roidb
-
-        gt_roidb = [self._load_pascal_annotation(index)
+        fp = open('./data/record.txt','w')
+        gt_roidb = [self._load_pascal_annotation(index, fp)
                     for index in self.image_index]
+        fp.close()
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
         print 'wrote gt roidb to {}'.format(cache_file)
@@ -177,7 +179,7 @@ class pascal_voc(imdb):
 
         return self.create_roidb_from_box_list(box_list, gt_roidb)
 
-    def _load_pascal_annotation(self, index):
+    def _load_pascal_annotation(self, index, fp):
         """
         Load image and bounding boxes info from XML file in the PASCAL VOC
         format.
@@ -203,18 +205,41 @@ class pascal_voc(imdb):
 
         # Load object bounding boxes into a data frame.
         for ix, obj in enumerate(objs):
+            cls_name = obj.find('name').text.lower().strip()
+            
+            if cls_name == 'dinningtable':
+                cls_name = 'diningtable'
+            if cls_name == 'oneperson' or cls_name == '3' : #or cls_name == 'aeroplane' or cls_name == 'bottle' or cls_name == 'bird' or cls_name == 'boat' or cls_name == 'cat' or cls_name == 'cow' or cls_name == 'diningtable' or cls_name == 'dog' or cls_name == 'horse' or cls_name == 'pottedplant' or cls_name == 'sheep' or cls_name == 'sofa' or cls_name == 'train' or cls_name == 'tvmonitor' or cls_name == 'bicycle' or cls_name == 'motorbike' or cls_name == 'chair' or cls_name == 'bus':
+                continue
             bbox = obj.find('bndbox')
             # Make pixel indexes 0-based
-            x1 = float(bbox.find('xmin').text) - 1
-            y1 = float(bbox.find('ymin').text) - 1
-            x2 = float(bbox.find('xmax').text) - 1
-            y2 = float(bbox.find('ymax').text) - 1
-            cls = self._class_to_ind[obj.find('name').text.lower().strip()]
+            x1 = float(bbox.find('xmin').text)-1
+            y1 = float(bbox.find('ymin').text)-1
+            x2 = float(bbox.find('xmax').text)-1
+            y2 = float(bbox.find('ymax').text)-1
+            if x2 < x1:
+                print index
+            if y2 < y1:
+                print index
+            if x1 <0.0:
+                x1 = 0.0
+            if x2<0.0:
+                x2 = 0.0
+            if y1<0.0:
+                y1 = 0.0
+            if y2<0.0:
+                y2=0.0
+            #cls = self._class_to_ind[obj.find('name').text.lower().strip()]
+            #print cls_name
+            cls = self._class_to_ind[cls_name]   
             boxes[ix, :] = [x1, y1, x2, y2]
             gt_classes[ix] = cls
             overlaps[ix, cls] = 1.0
             seg_areas[ix] = (x2 - x1 + 1) * (y2 - y1 + 1)
-
+            forwrite = cls_name + ' : '+str(x1)+', '+str(y1)+', '+str(x2)+', '+str(y2)
+            fp.writelines(forwrite)
+            fp.write('\n')
+        #    ix = ix+1
         overlaps = scipy.sparse.csr_matrix(overlaps)
 
         return {'boxes' : boxes,
@@ -270,24 +295,49 @@ class pascal_voc(imdb):
             'Main',
             self._image_set + '.txt')
         cachedir = os.path.join(self._devkit_path, 'annotations_cache')
+        folder_results = os.path.join(self._data_path, 'folder_results.txt')
+        folder_fp = open(folder_results, 'w')
         aps = []
+        folder_aps = {}
         # The PASCAL VOC metric changed in 2010
         use_07_metric = True if int(self._year) < 2010 else False
         print 'VOC07 metric? ' + ('Yes' if use_07_metric else 'No')
         if not os.path.isdir(output_dir):
             os.mkdir(output_dir)
+        folder_fp.write('all result :\n')
         for i, cls in enumerate(self._classes):
             if cls == '__background__':
                 continue
             filename = self._get_voc_results_file_template().format(cls)
-            rec, prec, ap = voc_eval(
+            rec, prec, ap, folder_rec, folder_prec, folder_ap = voc_eval(
                 filename, annopath, imagesetfile, cls, cachedir, ovthresh=0.5,
                 use_07_metric=use_07_metric)
+            if len(folder_aps) == 0:
+                for key in folder_ap:
+                    folder_aps[key] = []
+            for key in folder_ap:
+                folder_aps[key] +=[folder_ap[key]]
             aps += [ap]
             print('AP for {} = {:.4f}'.format(cls, ap))
+            folder_fp.write('AP for {} = {:.4f}\n'.format(cls, ap))
             with open(os.path.join(output_dir, cls + '_pr.pkl'), 'w') as f:
                 cPickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
+        for key in folder_aps:
+            folder_fp.write('result of '+key + ' :\n')
+            it = iter(folder_aps[key])
+            temp_aps = []
+            for i, cls in enumerate(self._classes):
+                if cls == '__background__':
+                    continue
+                score = it.next()
+                folder_fp.write('  AP for {} = {:.4f}\n'.format(cls, score))
+                if score != 0:
+                    temp_aps.append(score)
+            folder_fp.write('Mean AP = {:.4f}'.format(np.mean(temp_aps)))
+            folder_fp.write('\n')
         print('Mean AP = {:.4f}'.format(np.mean(aps)))
+        folder_fp.write('Mean AP = {:.4f}'.format(np.mean(aps)))
+        folder_fp.close()
         print('~~~~~~~~')
         print('Results:')
         for ap in aps:
