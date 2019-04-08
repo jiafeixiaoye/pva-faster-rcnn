@@ -50,6 +50,7 @@ def add_bbox_regression_targets(roidb):
 
     num_images = len(roidb)
     # Infer number of classes from the number of columns in gt_overlaps
+    #cathy,if use shadow minus 1, else don't minus
     num_classes = roidb[0]['gt_overlaps'].shape[1]
     for im_i in xrange(num_images):
         rois = roidb[im_i]['boxes']

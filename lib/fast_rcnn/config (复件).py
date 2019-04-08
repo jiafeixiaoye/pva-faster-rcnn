@@ -126,13 +126,7 @@ __C.TRAIN.RPN_BBOX_INSIDE_WEIGHTS = (1.0, 1.0, 1.0, 1.0)
 # Set to -1.0 to use uniform example weighting
 __C.TRAIN.RPN_POSITIVE_WEIGHT = -1.0
 
-__C.TRAIN.nms_loss_scale = 1.0
 
-
-
-cfg.TRAIN.FIRST_N=100
-cfg.TRAIN.BBOX_MEANS=(0.0, 0.0, 0.0, 0.0)
-cfg.TRAIN.BBOX_STDS=(0.1, 0.1, 0.2, 0.2)
 #
 # Testing options
 #
@@ -186,7 +180,7 @@ __C.TEST.BBOX_VOTE = False
 __C.TEST.BBOX_VOTE_N_WEIGHTED_SCORE = 1
 __C.TEST.BBOX_VOTE_WEIGHT_EMPTY = 0.5
 
-cfg.TEST.FIRST_N = 0
+
 #
 # MISC
 #

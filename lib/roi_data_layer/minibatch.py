@@ -35,9 +35,14 @@ def get_minibatch(roidb, num_classes):
         assert len(roidb) == 1, "Single batch only"
         # gt boxes: (x1, y1, x2, y2, cls)
         gt_inds = np.where(roidb[0]['gt_classes'] != 0)[0]
-        gt_boxes = np.empty((len(gt_inds), 5), dtype=np.float32)
+        #gt_boxes = np.empty((len(gt_inds), 5), dtype=np.float32)
+        #gt_boxes[:, 0:4] = roidb[0]['boxes'][gt_inds, :] * im_scales[0]
+        #gt_boxes[:, 4] = roidb[0]['gt_classes'][gt_inds]
+        #cathy_age: gt_boxes (x1,x2,y1,y2, cls, age)
+        gt_boxes = np.empty((len(gt_inds), 6), dtype=np.float32)
         gt_boxes[:, 0:4] = roidb[0]['boxes'][gt_inds, :] * im_scales[0]
         gt_boxes[:, 4] = roidb[0]['gt_classes'][gt_inds]
+        gt_boxes[:, 5] = roidb[0]['age'][gt_inds]
         blobs['gt_boxes'] = gt_boxes
         blobs['im_info'] = np.array(
             [np.hstack((im_blob.shape[2], im_blob.shape[3], im_scales[0]))],
@@ -135,6 +140,7 @@ def _get_image_blob(roidb, scale_inds):
     im_scales = []
     for i in xrange(num_images):
         im = cv2.imread(roidb[i]['image'])
+        #print roidb[i]['image']
         if roidb[i]['flipped']:
             im = im[:, ::-1, :]
         target_size = cfg.TRAIN.SCALES[scale_inds[i]]

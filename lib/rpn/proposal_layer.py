@@ -77,7 +77,7 @@ class ProposalLayer(caffe.Layer):
         scores = bottom[0].data[:, self._num_anchors:, :, :]
         bbox_deltas = bottom[1].data
         im_info = bottom[2].data[0, :]
-
+        
         if DEBUG:
             print 'im_size: ({}, {})'.format(im_info[0], im_info[1])
             print 'scale: {}'.format(im_info[2])
@@ -115,7 +115,7 @@ class ProposalLayer(caffe.Layer):
         # reshape to (1 * H * W * A, 4) where rows are ordered by (h, w, a)
         # in slowest to fastest order
         bbox_deltas = bbox_deltas.transpose((0, 2, 3, 1)).reshape((-1, 4))
-
+        
         # Same story for the scores:
         #
         # scores are (1, A, H, W) format
@@ -128,7 +128,7 @@ class ProposalLayer(caffe.Layer):
 
         # 2. clip predicted boxes to image
         proposals = clip_boxes(proposals, im_info[:2])
-
+        
         # 3. remove predicted boxes with either height or width < threshold
         # (NOTE: convert min_size to input image scale stored in im_info[2])
         keep = _filter_boxes(proposals, min_size * im_info[2])

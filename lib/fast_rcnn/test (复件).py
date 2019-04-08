@@ -33,7 +33,7 @@ def _get_image_blob(im):
             in the image pyramid
     """
     im_orig = im.astype(np.float32, copy=True)
-    #im_orig -= cfg.PIXEL_MEANS
+    im_orig -= cfg.PIXEL_MEANS
 
     im_shape = im_orig.shape
     im_size_min = np.min(im_shape[0:2])
@@ -53,7 +53,6 @@ def _get_image_blob(im):
         im_scale_y = np.floor(im.shape[0] * im_scale / cfg.TEST.SCALE_MULTIPLE_OF) * cfg.TEST.SCALE_MULTIPLE_OF / im.shape[0]
         im = cv2.resize(im_orig, None, None, fx=im_scale_x, fy=im_scale_y,
                         interpolation=cv2.INTER_LINEAR)
-        im -= cfg.PIXEL_MEANS
         im_scale_factors.append(np.array([im_scale_x, im_scale_y, im_scale_x, im_scale_y]))
         processed_ims.append(im)
 
@@ -198,28 +197,22 @@ def im_detect(net, im, _t=None, boxes=None):
         # Simply repeat the boxes, once for each class
         pred_boxes = np.tile(boxes, (1, scores.shape[1]))
 
-    ages= net.blobs['age_prob'].data
-
     if cfg.DEDUP_BOXES > 0 and not cfg.TEST.HAS_RPN:
         # Map scores and predictions back to the original set of boxes
         scores = scores[inv_index, :]
         pred_boxes = pred_boxes[inv_index, :]
-        ages = ages[inv_index, :]
     if _t:
         _t['im_postproc'].toc()
 
-    return scores, pred_boxes, ages
+    return scores, pred_boxes
 
-def vis_detections(im, class_name, dets, age_nms, thresh=0.3):
+def vis_detections(im, class_name, dets, thresh=0.3):
     """Visual debugging of detections."""
     import matplotlib.pyplot as plt
     im = im[:, :, (2, 1, 0)]
     for i in xrange(np.minimum(10, dets.shape[0])):
         bbox = dets[i, :4]
         score = dets[i, -1]
-        ages = age_nms[i,:]
-        ages = ages.tolist()
-        age = ages.index(max(ages))
         if score > thresh:
             plt.cla()
             plt.imshow(im)
@@ -229,7 +222,7 @@ def vis_detections(im, class_name, dets, age_nms, thresh=0.3):
                               bbox[3] - bbox[1], fill=False,
                               edgecolor='g', linewidth=3)
                 )
-            plt.title('{}  {:.3f} {:d}'.format(class_name, score, age))
+            plt.title('{}  {:.3f}'.format(class_name, score))
             plt.show()
 
 def apply_nms(all_boxes, thresh):
@@ -297,7 +290,6 @@ def test_net(net, imdb, max_per_image=100, thresh=0.01, vis=False):
     # all detections are collected into:
     #    all_boxes[cls][image] = N x 5 array of detections in
     #    (x1, y1, x2, y2, score)
-    #cathy age all_boxes[cls][image] = N*6, (x1,x2,y1,y2,score,age)
     all_boxes = [[[] for _ in xrange(num_images)]
                  for _ in xrange(imdb.num_classes)]
 
@@ -322,10 +314,10 @@ def test_net(net, imdb, max_per_image=100, thresh=0.01, vis=False):
             box_proposals = roidb[i]['boxes'][roidb[i]['gt_classes'] == 0]
 
         im = cv2.imread(imdb.image_path_at(i))
-        scores, boxes, ages = im_detect(net, im, _t, box_proposals)
+        scores, boxes = im_detect(net, im, _t, box_proposals)
         ss = scores.shape
-        #print ages.type
-        #print scores.shape, boxes.shape, ages.shape
+        print ss
+        print boxes.shape
 
         _t['misc'].tic()
         # skip j = 0, because it's the background class
@@ -335,50 +327,32 @@ def test_net(net, imdb, max_per_image=100, thresh=0.01, vis=False):
             inds = np.where(scores[:, j] > thresh)[0]
             cls_scores = scores[inds, j]
             cls_boxes = boxes[inds, j*4:(j+1)*4]
-            cls_ages = ages[inds,:]
-            #print cls_scores.shape, cls_boxes.shape, cls_age.shape
-           #cathy
-            age_array = np.zeros(cls_ages.shape[0])
-            for idx in range(cls_ages.shape[0]):
-                ages_c = cls_ages[idx,:]
-                ages_l = ages_c.tolist()
-                age = ages_l.index(max(ages_l))
-                age_array[idx] = age
             cls_dets = np.hstack((cls_boxes, cls_scores[:, np.newaxis])) \
                 .astype(np.float32, copy=False)
-            
-            keep = nms(cls_dets[:, :5], cfg.TEST.NMS)
-            #print age_array[:, np.newaxis]
-            #cls_dets = np.hstack((cls_boxes, cls_scores[:, np.newaxis], age_array[:, np.newaxis])) \
-            #    .astype(np.float32, copy=False)
+            keep = nms(cls_dets, cfg.TEST.NMS)
+
             dets_NMSed = cls_dets[keep, :]
-            age_nmsed = cls_ages[keep, :]
             if cfg.TEST.BBOX_VOTE:
                 cls_dets = bbox_vote(dets_NMSed, cls_dets)
             else:
                 cls_dets = dets_NMSed
 
             if vis:
-                vis_detections(im, imdb.classes[j], cls_dets, age_nmsed)
-            
-             
-            cls_dets_for_all = np.hstack((cls_dets[:], age_array[keep, np.newaxis]))
-            all_boxes[j][i] = cls_dets_for_all
-            #print cls_dets_for_all
-           
+                vis_detections(im, imdb.classes[j], cls_dets)
+            all_boxes[j][i] = cls_dets
 
         # Limit to max_per_image detections *over all classes*
         if max_per_image > 0:
-            #image_scores = np.hstack([all_boxes[j][i][:, -2]
+            #image_scores = np.hstack([all_boxes[j][i][:, -1]
              #                         for j in xrange(1, imdb.num_classes)])
-
-            image_scores = np.hstack([all_boxes[j][i][:, -2] for j in xrange(1, int(ss[1]))])
+            image_scores = np.hstack([all_boxes[j][i][:, -1]
+                                      for j in xrange(1, int(ss[1]))])
             if len(image_scores) > max_per_image:
                 image_thresh = np.sort(image_scores)[-max_per_image]
                 for j in xrange(1, imdb.num_classes):
                     if int(ss[1]) <= j:
                         continue
-                    keep = np.where(all_boxes[j][i][:, -2] >= image_thresh)[0]
+                    keep = np.where(all_boxes[j][i][:, -1] >= image_thresh)[0]
                     all_boxes[j][i] = all_boxes[j][i][keep, :]
         _t['misc'].toc()
 

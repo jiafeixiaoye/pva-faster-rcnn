@@ -16,6 +16,7 @@ import os
 
 from caffe.proto import caffe_pb2
 import google.protobuf as pb2
+import google.protobuf.text_format
 
 class SolverWrapper(object):
     """A simple wrapper around Caffe's solver.
@@ -60,19 +61,19 @@ class SolverWrapper(object):
 
         scale_bbox_params = (cfg.TRAIN.BBOX_REG and
                              cfg.TRAIN.BBOX_NORMALIZE_TARGETS and
-                             net.params.has_key('bbox_pred'))
+                             net.params.has_key('new_bbox_pred'))
 
         if scale_bbox_params:
             # save original values
-            orig_0 = net.params['bbox_pred'][0].data.copy()
-            orig_1 = net.params['bbox_pred'][1].data.copy()
+            orig_0 = net.params['new_bbox_pred'][0].data.copy()
+            orig_1 = net.params['new_bbox_pred'][1].data.copy()
 
             # scale and shift with bbox reg unnormalization; then save snapshot
-            net.params['bbox_pred'][0].data[...] = \
-                    (net.params['bbox_pred'][0].data *
+            net.params['new_bbox_pred'][0].data[...] = \
+                    (net.params['new_bbox_pred'][0].data *
                      self.bbox_stds[:, np.newaxis])
-            net.params['bbox_pred'][1].data[...] = \
-                    (net.params['bbox_pred'][1].data *
+            net.params['new_bbox_pred'][1].data[...] = \
+                    (net.params['new_bbox_pred'][1].data *
                      self.bbox_stds + self.bbox_means)
 
         infix = ('_' + cfg.TRAIN.SNAPSHOT_INFIX
@@ -86,8 +87,8 @@ class SolverWrapper(object):
 
         if scale_bbox_params:
             # restore net to original state
-            net.params['bbox_pred'][0].data[...] = orig_0
-            net.params['bbox_pred'][1].data[...] = orig_1
+            net.params['new_bbox_pred'][0].data[...] = orig_0
+            net.params['new_bbox_pred'][1].data[...] = orig_1
         return filename
 
     def train_model(self, max_iters):

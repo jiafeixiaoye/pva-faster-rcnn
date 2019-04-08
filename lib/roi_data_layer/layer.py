@@ -87,7 +87,7 @@ class RoIDataLayer(caffe.Layer):
         layer_params = yaml.load(self.param_str)
 
         self._num_classes = layer_params['num_classes']
-
+        self._age_classes = layer_params['age_classes']
         self._name_to_top_map = {}
 
         # data blob: holds a batch of N images, each with 3 channels

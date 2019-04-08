@@ -61,6 +61,7 @@ class imdb(object):
         #   boxes
         #   gt_overlaps
         #   gt_classes
+        #   age
         #   flipped
         if self._roidb is not None:
             return self._roidb
@@ -106,12 +107,19 @@ class imdb(object):
             boxes = self.roidb[i]['boxes'].copy()
             oldx1 = boxes[:, 0].copy()
             oldx2 = boxes[:, 2].copy()
+            #if i == 5:
+            #    print boxes, widths[i], oldx1,oldx2
             boxes[:, 0] = widths[i] - oldx2 - 1
-            boxes[:, 2] = widths[i] - oldx1 - 1
+            boxes[:, 2] = widths[i] - oldx1 - 1 
+            #print i
+            #print boxes[:, 0],boxes[:, 2],widths
+
             assert (boxes[:, 2] >= boxes[:, 0]).all()
+            
             entry = {'boxes' : boxes,
                      'gt_overlaps' : self.roidb[i]['gt_overlaps'],
                      'gt_classes' : self.roidb[i]['gt_classes'],
+                     'age' : self.roidb[i]['age'],#cathy age
                      'flipped' : True}
             self.roidb.append(entry)
         self._image_index = self._image_index * 2
@@ -232,6 +240,7 @@ class imdb(object):
                 'gt_overlaps' : overlaps,
                 'flipped' : False,
                 'seg_areas' : np.zeros((num_boxes,), dtype=np.float32),
+                'age': np.zeros((num_boxes,), dtype=np.float32)#cathy age
             })
         return roidb
 
@@ -246,6 +255,7 @@ class imdb(object):
                                                        b[i]['gt_overlaps']])
             a[i]['seg_areas'] = np.hstack((a[i]['seg_areas'],
                                            b[i]['seg_areas']))
+            a[i]['age'] = np.hstack((a[i]['age'], b[i]['age']))#cathy age
         return a
 
     def competition_mode(self, on):

@@ -29,12 +29,14 @@ class ProposalTargetLayer(caffe.Layer):
         top[0].reshape(1, 5)
         # labels
         top[1].reshape(1, 1)
+        # ages
+        top[2].reshape(1, 1)
         # bbox_targets
-        top[2].reshape(1, self._num_classes * 4)
-        # bbox_inside_weights
         top[3].reshape(1, self._num_classes * 4)
-        # bbox_outside_weights
+        # bbox_inside_weights
         top[4].reshape(1, self._num_classes * 4)
+        # bbox_outside_weights
+        top[5].reshape(1, self._num_classes * 4)
 
     def forward(self, bottom, top):
         # Proposal ROIs (0, x1, y1, x2, y2) coming from RPN
@@ -48,8 +50,8 @@ class ProposalTargetLayer(caffe.Layer):
         # Include ground-truth boxes in the set of candidate rois
         zeros = np.zeros((gt_boxes.shape[0], 1), dtype=gt_boxes.dtype)
         all_rois = np.vstack(
-            (all_rois, np.hstack((zeros, gt_boxes[:, :-1])))
-        )
+            (all_rois, np.hstack((zeros, gt_boxes[:, :-2])))
+        )#cathy age change to -2
 
         # Sanity check: single batch only
         assert np.all(all_rois[:, 0] == 0), \
@@ -61,7 +63,7 @@ class ProposalTargetLayer(caffe.Layer):
 
         # Sample rois with classification labels and bounding box regression
         # targets
-        labels, rois, bbox_targets, bbox_inside_weights = _sample_rois(
+        labels, ages, rois, bbox_targets, bbox_inside_weights = _sample_rois(
             all_rois, gt_boxes, fg_rois_per_image,
             rois_per_image, self._num_classes)
 
@@ -83,17 +85,21 @@ class ProposalTargetLayer(caffe.Layer):
         top[1].reshape(*labels.shape)
         top[1].data[...] = labels
 
+        # ages
+        top[2].reshape(*ages.shape)
+        top[2].data[...] = ages
+
         # bbox_targets
-        top[2].reshape(*bbox_targets.shape)
-        top[2].data[...] = bbox_targets
+        top[3].reshape(*bbox_targets.shape)
+        top[3].data[...] = bbox_targets
 
         # bbox_inside_weights
-        top[3].reshape(*bbox_inside_weights.shape)
-        top[3].data[...] = bbox_inside_weights
+        top[4].reshape(*bbox_inside_weights.shape)
+        top[4].data[...] = bbox_inside_weights
 
         # bbox_outside_weights
-        top[4].reshape(*bbox_inside_weights.shape)
-        top[4].data[...] = np.array(bbox_inside_weights > 0).astype(np.float32)
+        top[5].reshape(*bbox_inside_weights.shape)
+        top[5].data[...] = np.array(bbox_inside_weights > 0).astype(np.float32)
 
     def backward(self, top, propagate_down, bottom):
         """This layer does not propagate gradients."""
@@ -115,14 +121,17 @@ def _get_bbox_regression_labels(bbox_target_data, num_classes):
         bbox_target (ndarray): N x 4K blob of regression targets
         bbox_inside_weights (ndarray): N x 4K blob of loss weights
     """
-
+    
     clss = bbox_target_data[:, 0]
     bbox_targets = np.zeros((clss.size, 4 * num_classes), dtype=np.float32)
     bbox_inside_weights = np.zeros(bbox_targets.shape, dtype=np.float32)
     inds = np.where(clss > 0)[0]
     for ind in inds:
         cls = clss[ind]
-        start = 4 * cls
+        #cathy, jump the shadow class.
+        #if int(cls) == 24:
+         #   continue
+        start = int(4 * cls)
         end = start + 4
         bbox_targets[ind, start:end] = bbox_target_data[ind, 1:]
         bbox_inside_weights[ind, start:end] = cfg.TRAIN.BBOX_INSIDE_WEIGHTS
@@ -155,12 +164,13 @@ def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_clas
     gt_assignment = overlaps.argmax(axis=1)
     max_overlaps = overlaps.max(axis=1)
     labels = gt_boxes[gt_assignment, 4]
+    ages = gt_boxes[gt_assignment, 5]
 
     # Select foreground RoIs as those with >= FG_THRESH overlap
     fg_inds = np.where(max_overlaps >= cfg.TRAIN.FG_THRESH)[0]
     # Guard against the case when an image has fewer than fg_rois_per_image
     # foreground RoIs
-    fg_rois_per_this_image = min(fg_rois_per_image, fg_inds.size)
+    fg_rois_per_this_image = int(min(fg_rois_per_image, fg_inds.size))
     # Sample foreground regions without replacement
     if fg_inds.size > 0:
         fg_inds = npr.choice(fg_inds, size=fg_rois_per_this_image, replace=False)
@@ -171,11 +181,10 @@ def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_clas
     # Compute number of background RoIs to take from this image (guarding
     # against there being fewer than desired)
     bg_rois_per_this_image = rois_per_image - fg_rois_per_this_image
-    bg_rois_per_this_image = min(bg_rois_per_this_image, bg_inds.size)
+    bg_rois_per_this_image = int(min(bg_rois_per_this_image, bg_inds.size))
     # Sample background regions without replacement
     if bg_inds.size > 0:
         bg_inds = npr.choice(bg_inds, size=bg_rois_per_this_image, replace=False)
-
     # The indices that we're selecting (both fg and bg)
     keep_inds = np.append(fg_inds, bg_inds)
     # Select sampled values from various arrays:
@@ -184,10 +193,12 @@ def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_clas
     labels[fg_rois_per_this_image:] = 0
     rois = all_rois[keep_inds]
 
+    ages = ages[keep_inds]
+
     bbox_target_data = _compute_targets(
         rois[:, 1:5], gt_boxes[gt_assignment[keep_inds], :4], labels)
 
     bbox_targets, bbox_inside_weights = \
         _get_bbox_regression_labels(bbox_target_data, num_classes)
 
-    return labels, rois, bbox_targets, bbox_inside_weights
+    return labels, ages, rois, bbox_targets, bbox_inside_weights

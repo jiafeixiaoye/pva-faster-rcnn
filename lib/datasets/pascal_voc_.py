@@ -16,7 +16,7 @@ import utils.cython_bbox
 import cPickle
 import subprocess
 import uuid
-from voc_eval import voc_eval, age_eval
+from voc_eval import voc_eval
 from fast_rcnn.config import cfg
 
 class pascal_voc(imdb):
@@ -28,13 +28,11 @@ class pascal_voc(imdb):
                             else devkit_path
         self._data_path = os.path.join(self._devkit_path, 'VOC' + self._year)
         self._classes = ('__background__', # always index 0
-                         #'aeroplane', 'bicycle', 'bird', 'boat',
-                         #'bottle', 'bus', 'automobile', 'cat', 'chair',
-                         #'cow', 'diningtable', 'dog', 'horse',
-                         #'motorbike', 'person', 'pottedplant',
-                         #'sheep', 'sofa', 'train', 'tvmonitor',#)
-                         #'head','cart','face','shadow')
-                         'male', 'female')
+                         'aeroplane', 'bicycle', 'bird', 'boat',
+                         'bottle', 'bus', 'car', 'cat', 'chair',
+                         'cow', 'diningtable', 'dog', 'horse',
+                         'motorbike', 'person', 'pottedplant',
+                         'sheep', 'sofa', 'train', 'tvmonitor')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index()
@@ -104,10 +102,9 @@ class pascal_voc(imdb):
                 roidb = cPickle.load(fid)
             print '{} gt roidb loaded from {}'.format(self.name, cache_file)
             return roidb
-        fp = open('./data/record.txt','w')
-        gt_roidb = [self._load_pascal_annotation(index, fp)
+
+        gt_roidb = [self._load_pascal_annotation(index)
                     for index in self.image_index]
-        fp.close()
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
         print 'wrote gt roidb to {}'.format(cache_file)
@@ -168,6 +165,7 @@ class pascal_voc(imdb):
         assert os.path.exists(filename), \
                'Selective search data not found at: {}'.format(filename)
         raw_data = sio.loadmat(filename)['boxes'].ravel()
+
         box_list = []
         for i in xrange(raw_data.shape[0]):
             boxes = raw_data[i][:, (1, 0, 3, 2)] - 1
@@ -179,7 +177,7 @@ class pascal_voc(imdb):
 
         return self.create_roidb_from_box_list(box_list, gt_roidb)
 
-    def _load_pascal_annotation(self, index, fp):
+    def _load_pascal_annotation(self, index):
         """
         Load image and bounding boxes info from XML file in the PASCAL VOC
         format.
@@ -187,10 +185,6 @@ class pascal_voc(imdb):
         filename = os.path.join(self._data_path, 'Annotations', index + '.xml')
         tree = ET.parse(filename)
         objs = tree.findall('object')
-        #day_flag = int(tree.find('day_flag').text)
-        size_o = tree.find('size')
-        width = int(size_o.find('width').text)
-        height = int(size_o.find('height').text)
         if not self.config['use_diff']:
             # Exclude the samples labeled as difficult
             non_diff_objs = [
@@ -206,76 +200,40 @@ class pascal_voc(imdb):
         overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
         # "Seg" area for pascal is just the box area
         seg_areas = np.zeros((num_objs), dtype=np.float32)
-#cathy age
-        age = np.zeros((num_objs), dtype = np.float32)
 
         # Load object bounding boxes into a data frame.
         for ix, obj in enumerate(objs):
-           
             cls_name = obj.find('name').text.lower().strip()
-            
-            if cls_name == 'dinningtable':
-                cls_name = 'diningtable'
-            if cls_name == 'oneperson' or cls_name == '3': #or cls_name == 'shadow': #or cls_name == 'aeroplane' or cls_name == 'bottle' or cls_name == 'bird' or cls_name == 'boat' or cls_name == 'cat' or cls_name == 'cow' or cls_name == 'diningtable' or cls_name == 'dog' or cls_name == 'horse' or cls_name == 'pottedplant' or cls_name == 'sheep' or cls_name == 'sofa' or cls_name == 'train' or cls_name == 'tvmonitor' or cls_name == 'bicycle' or cls_name == 'motorbike' or cls_name == 'chair' or cls_name == 'bus':
+            if cls_name == 'oneperson':
                 continue
-            if cls_name == 'car':
-                cls_name = 'automobile'
-#            if cls_name == 'person' or cls_name == 'head':
-#                if day_flag == 0:
-#                    print "get one"
-                    #continue
-#cathy age
-            age_num = int(obj.find('truncated').text)
             bbox = obj.find('bndbox')
             # Make pixel indexes 0-based
-            x1 = float(bbox.find('xmin').text)-1
-            y1 = float(bbox.find('ymin').text)-1
-            x2 = float(bbox.find('xmax').text)-1
-            y2 = float(bbox.find('ymax').text)-1
-            if x2 < x1:
-                print index
-            if y2 < y1:
-                print index
-            if x1 <0.0:
+            x1 = float(bbox.find('xmin').text) - 1
+            y1 = float(bbox.find('ymin').text) - 1
+            x2 = float(bbox.find('xmax').text) - 1
+            y2 = float(bbox.find('ymax').text) - 1
+            if x1 < 0.0:
                 x1 = 0.0
-            if x2<0.0:
+            if x2 < 0.0:
                 x2 = 0.0
-            if y1<0.0:
+            if y1 < 0.0:
                 y1 = 0.0
-            if y2<0.0:
-                y2=0.0
-            if int(x2) >= width:
-                x2 = width-1
-            #    print index
-            #    print x1,x2,y1,y2,width,height
-            if y2 >= height:
-                y2 = height-1
+            if y2 < 0.0:
+                y2 = 0.0
+            cls = self._class_to_ind[cls_name]
             #cls = self._class_to_ind[obj.find('name').text.lower().strip()]
-            #print cls_name 
-            #print x1,y1,x2,y2
-      
-            #if width != r_width:
-            #    print index
-            cls = self._class_to_ind[cls_name]   
             boxes[ix, :] = [x1, y1, x2, y2]
-            #if  ((width - boxes[:, 2]-1) >  (width - boxes[:, 0]-1)).all():
-            #    print index, boxes, width
             gt_classes[ix] = cls
             overlaps[ix, cls] = 1.0
             seg_areas[ix] = (x2 - x1 + 1) * (y2 - y1 + 1)
-            age[ix] = age_num
-            forwrite = cls_name + ' : '+str(x1)+', '+str(y1)+', '+str(x2)+', '+str(y2)
-            fp.writelines(forwrite)
-            fp.write('\n')
-            #ix = ix+1
+
         overlaps = scipy.sparse.csr_matrix(overlaps)
-   
+
         return {'boxes' : boxes,
                 'gt_classes': gt_classes,
                 'gt_overlaps' : overlaps,
                 'flipped' : False,
-                'seg_areas' : seg_areas,
-                'age':age}
+                'seg_areas' : seg_areas}
 
     def _get_comp_id(self):
         comp_id = (self._comp_id + '_' + self._salt if self.config['use_salt']
@@ -306,8 +264,8 @@ class pascal_voc(imdb):
                         continue
                     # the VOCdevkit expects 1-based indices
                     for k in xrange(dets.shape[0]):
-                        f.write('{:s} {:.3f} {} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
-                                format(index, dets[k, -2], dets[k, -1],
+                        f.write('{:s} {:.3f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
+                                format(index, dets[k, -1],
                                        dets[k, 0] + 1, dets[k, 1] + 1,
                                        dets[k, 2] + 1, dets[k, 3] + 1))
 
@@ -324,52 +282,24 @@ class pascal_voc(imdb):
             'Main',
             self._image_set + '.txt')
         cachedir = os.path.join(self._devkit_path, 'annotations_cache')
-        folder_results = os.path.join(self._data_path, 'folder_results.txt')
-        folder_fp = open(folder_results, 'w')
         aps = []
-        folder_aps = {}
         # The PASCAL VOC metric changed in 2010
         use_07_metric = True if int(self._year) < 2010 else False
         print 'VOC07 metric? ' + ('Yes' if use_07_metric else 'No')
         if not os.path.isdir(output_dir):
             os.mkdir(output_dir)
-        folder_fp.write('all result :\n')
         for i, cls in enumerate(self._classes):
             if cls == '__background__':
                 continue
             filename = self._get_voc_results_file_template().format(cls)
-            print cls
-            rec, prec, ap, folder_rec, folder_prec, folder_ap= voc_eval(
+            rec, prec, ap = voc_eval(
                 filename, annopath, imagesetfile, cls, cachedir, ovthresh=0.5,
                 use_07_metric=use_07_metric)
-            if len(folder_aps) == 0:
-                for key in folder_ap:
-                    folder_aps[key] = []
-            for key in folder_ap:
-                folder_aps[key] +=[folder_ap[key]]
             aps += [ap]
             print('AP for {} = {:.4f}'.format(cls, ap))
-            folder_fp.write('AP for {} = {:.4f}\n'.format(cls, ap))
             with open(os.path.join(output_dir, cls + '_pr.pkl'), 'w') as f:
                 cPickle.dump({'rec': rec, 'prec': prec, 'ap': ap}, f)
-            
-        for key in folder_aps:
-            folder_fp.write('result of '+key + ' :\n')
-            it = iter(folder_aps[key])
-            temp_aps = []
-            for i, cls in enumerate(self._classes):
-                if cls == '__background__':
-                    continue
-                score = it.next()
-                folder_fp.write('  AP for {} = {:.4f}\n'.format(cls, score))
-                if score != 0:
-                    temp_aps.append(score)
-            folder_fp.write('Mean AP = {:.4f}'.format(np.mean(temp_aps)))
-            folder_fp.write('\n')
         print('Mean AP = {:.4f}'.format(np.mean(aps)))
-        folder_fp.write('Mean AP = {:.4f}'.format(np.mean(aps)))
-        folder_fp.close()
-
         print('~~~~~~~~')
         print('Results:')
         for ap in aps:
@@ -399,61 +329,9 @@ class pascal_voc(imdb):
         print('Running:\n{}'.format(cmd))
         status = subprocess.call(cmd, shell=True)
 
-    def _do_age_eval(self, all_boxes):
-        annopath = os.path.join(
-            self._devkit_path,
-            'VOC' + self._year,
-            'Annotations',
-            '{:s}.xml')
-        imagesetfile = os.path.join(
-            self._devkit_path,
-            'VOC' + self._year,
-            'ImageSets',
-            'Main',
-            self._image_set + '.txt')
-        filename = self._get_voc_results_file_template().format('age')
-        
-        with open(filename, 'wt') as f:
-            for im_ind, index in enumerate(self.image_index):
-                #dets=[]
-                dets_array_list = []
-                
-                for cls_ind, cls in enumerate(self.classes):
-                    if cls == '__background__':
-                        continue
-                    d = all_boxes[cls_ind][im_ind]
-                    dets_array_list.append(d)
-                    #dets.append(all_boxes[cls_ind][im_ind])
-                    
-                dets_array = np.vstack((dets_array_list[0],dets_array_list[1]))
-                if dets_array == []:
-                    continue
-                scores = dets_array[:,-2]
-                scores = scores.tolist()
-                #scores = []
-                #print dets
-                #for item in dets:
-                #    if item.shape[0] == 0:
-                #        continue
-                    #print item[:,-2]
-                    #scores.append(item[:,-2])
-                print scores
-                k = scores.index(max(scores))
-                # the VOCdevkit expects 1-based indices
-                print k
-                f.write('{:s} {:.3f} {} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
-                        format(index, dets_array[k, -2], dets_array[k, -1],
-                               dets_array[k, 0] + 1, dets_array[k, 1] + 1,
-                               dets_array[k, 2] + 1, dets_array[k, 3] + 1))
-        acc, threshold= age_eval(filename, annopath, imagesetfile)
-        for i in range(len(acc)):
-            print('age acc of threshold {} is {:.4f}'.format(threshold[i], acc[i]))
-
     def evaluate_detections(self, all_boxes, output_dir):
-        self._do_age_eval(all_boxes)
         self._write_voc_results_file(all_boxes)
         self._do_python_eval(output_dir)
-
         if self.config['matlab_eval']:
             self._do_matlab_eval(output_dir)
         if self.config['cleanup']:
